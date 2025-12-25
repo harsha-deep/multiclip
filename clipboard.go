@@ -41,3 +41,27 @@ func GetClipboardHistory() []string {
 func CopyToClipboard(text string) {
 	clipboard.WriteAll(text)
 }
+
+func ClearClipboardHistory() {
+	lock.Lock()
+	defer lock.Unlock()
+	history = []string{}
+	last = ""
+}
+
+func DeleteItem(index int) {
+	lock.Lock()
+	defer lock.Unlock()
+	if index >= 0 && index < len(history) {
+		history = append(history[:index], history[index+1:]...)
+	}
+}
+
+func PinItem(index int) {
+	lock.Lock()
+	defer lock.Unlock()
+	if index >= 0 && index < len(history) {
+		item := history[index]
+		history = append([]string{item}, append(history[:index], history[index+1:]...)...)
+	}
+}

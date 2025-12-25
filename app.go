@@ -28,3 +28,15 @@ func (a *App) GetHistory() []string {
 func (a *App) Copy(text string) {
 	CopyToClipboard(text)
 }
+
+func (a *App) ClearHistory() {
+	ClearClipboardHistory()
+}
+
+func (a *App) DeleteItem(index int) {
+	DeleteItem(index)
+}
+
+func (a *App) PinItem(index int) {
+	PinItem(index)
+}
