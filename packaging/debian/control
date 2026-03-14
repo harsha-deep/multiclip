@@ -1,0 +1,20 @@
+Source: multiclip
+Section: utils
+Priority: optional
+Maintainer: Harshadeep Donapati <harsha@example.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ meson (>= 0.61),
+ ninja-build,
+ libgtk-4-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: multiclip
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libgtk-4-1
+Description: MultiClip clipboard manager
+ MultiClip is a clipboard manager application built with GTK4.

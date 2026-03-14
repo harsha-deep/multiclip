@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=MultiClip
+Comment=Clipboard Manager
+Exec=multiclip
+Icon=com.harsha.multiclip
+Type=Application
+Categories=Utility;
+Terminal=false
+StartupNotify=true

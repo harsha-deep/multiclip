@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.harsha.multiclip</id>
+  <name>MultiClip</name>
+  <summary>Clipboard Manager</summary>
+  <description>
+    <p>MultiClip is a clipboard manager application built with GTK4.</p>
+  </description>
+  <launchable type="desktop-id">com.harsha.multiclip.desktop</launchable>
+  <url type="homepage">https://github.com/harsha/multiclip</url>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <releases>
+    <release version="0.1.0" date="2026-03-14"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>
