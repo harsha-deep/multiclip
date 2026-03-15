@@ -4,7 +4,7 @@ GtkWidget *label;
 
 static void clipboard_text_received(GObject *source,
                                     GAsyncResult *res,
-                                    gpointer data)
+                                    gpointer data G_GNUC_UNUSED)
 {
     GError *error = NULL;
     char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), res, &error);
@@ -21,14 +21,14 @@ static void clipboard_text_received(GObject *source,
     }
 }
 
-static void clipboard_changed(GdkClipboard *clipboard, gpointer data)
+static void clipboard_changed(GdkClipboard *clipboard, gpointer data G_GNUC_UNUSED)
 {
     gdk_clipboard_read_text_async(clipboard, NULL,
                                   clipboard_text_received,
                                   NULL);
 }
 
-static void activate(GtkApplication *app, gpointer user_data)
+static void activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 {
     GtkWidget *window = gtk_application_window_new(app);
 
