@@ -6,6 +6,7 @@ project(
 )
 
 gtk = dependency('gtk4')
+glib = dependency('glib-2.0')
 
 subdir('data')
 subdir('src')
