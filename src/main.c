@@ -2,9 +2,7 @@
 
 GtkWidget *label;
 
-static void clipboard_text_received(GObject *source,
-                                    GAsyncResult *res,
-                                    gpointer data G_GNUC_UNUSED)
+static void clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data G_GNUC_UNUSED)
 {
     GError *error = NULL;
     char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), res, &error);
@@ -23,9 +21,7 @@ static void clipboard_text_received(GObject *source,
 
 static void clipboard_changed(GdkClipboard *clipboard, gpointer data G_GNUC_UNUSED)
 {
-    gdk_clipboard_read_text_async(clipboard, NULL,
-                                  clipboard_text_received,
-                                  NULL);
+    gdk_clipboard_read_text_async(clipboard, NULL, clipboard_text_received, NULL);
 }
 
 static void activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
@@ -44,9 +40,7 @@ static void activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
     GdkClipboard *clipboard = gdk_display_get_clipboard(display);
 
     /* Listen for clipboard changes */
-    g_signal_connect(clipboard, "changed",
-                     G_CALLBACK(clipboard_changed),
-                     NULL);
+    g_signal_connect(clipboard, "changed", G_CALLBACK(clipboard_changed), NULL);
 
     gtk_window_present(GTK_WINDOW(window));
 }
@@ -56,12 +50,9 @@ int main(int argc, char **argv)
     GtkApplication *app;
     int status;
 
-    app = gtk_application_new("com.harsha.multiclip",
-                              G_APPLICATION_DEFAULT_FLAGS);
+    app = gtk_application_new("com.harsha.multiclip", G_APPLICATION_DEFAULT_FLAGS);
 
-    g_signal_connect(app, "activate",
-                     G_CALLBACK(activate),
-                     NULL);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
 
     status = g_application_run(G_APPLICATION(app), argc, argv);
 
