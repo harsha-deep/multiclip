@@ -1,3 +1,4 @@
+#include "config.h"
 #include <gtk/gtk.h>
 
 typedef struct
@@ -50,7 +51,7 @@ on_about(GSimpleAction *action G_GNUC_UNUSED,
   gtk_label_set_markup(GTK_LABEL(name_label), "<b>MultiClip</b>");
   gtk_box_append(GTK_BOX(vbox), name_label);
 
-  GtkWidget *version_label = gtk_label_new("Version 0.1.0");
+  GtkWidget *version_label = gtk_label_new("Version " APP_VERSION);
   gtk_box_append(GTK_BOX(vbox), version_label);
 
   GtkWidget *link = gtk_link_button_new_with_label(
