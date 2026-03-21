@@ -100,6 +100,8 @@ add_to_history(AppData *app, const char *text)
   if (app->history->len >= 50)
     g_ptr_array_remove_index(app->history, 0);
 
+  g_ptr_array_add(app->history, g_strdup(text));
+
   GtkWidget *label = gtk_label_new(text);
   gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
   gtk_label_set_max_width_chars(GTK_LABEL(label), 60);
