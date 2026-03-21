@@ -1,11 +1,85 @@
 #include <gtk/gtk.h>
 
-// Your app state - NO MORE GLOBALS (except this one struct)
 typedef struct
 {
   GtkWidget *list_box;
   GPtrArray *history;
 } AppData;
+
+static void
+on_check_updates(GtkButton *btn G_GNUC_UNUSED, gpointer data)
+{
+  GtkUriLauncher *launcher = gtk_uri_launcher_new(
+      "https://github.com/harsha-deep/multiclip/releases");
+  gtk_uri_launcher_launch(launcher, GTK_WINDOW(data), NULL, NULL, NULL);
+  g_object_unref(launcher);
+}
+
+static void
+on_about(GSimpleAction *action G_GNUC_UNUSED,
+         GVariant *param G_GNUC_UNUSED,
+         gpointer data)
+{
+  GtkWindow *parent = GTK_WINDOW(data);
+
+  GtkWidget *about = gtk_window_new();
+  gtk_window_set_title(GTK_WINDOW(about), "About MultiClip");
+  gtk_window_set_modal(GTK_WINDOW(about), TRUE);
+  gtk_window_set_transient_for(GTK_WINDOW(about), parent);
+  gtk_window_set_resizable(GTK_WINDOW(about), FALSE);
+  // gtk_window_set_default_size(GTK_WINDOW(about), 300, 260);
+
+  GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+  gtk_widget_set_margin_top(vbox, 24);
+  gtk_widget_set_margin_bottom(vbox, 24);
+  gtk_widget_set_margin_start(vbox, 24);
+  gtk_widget_set_margin_end(vbox, 24);
+  gtk_window_set_child(GTK_WINDOW(about), vbox);
+
+  // GtkWidget *icon = gtk_image_new_from_icon_name("edit-paste-symbolic");
+  // gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
+  // gtk_box_append(GTK_BOX(vbox), icon);
+
+  GdkTexture *texture = gdk_texture_new_from_file(
+      g_file_new_for_path("data/icons/icon.png"), NULL);
+  GtkWidget *icon = gtk_image_new_from_paintable(GDK_PAINTABLE(texture));
+  gtk_box_append(GTK_BOX(vbox), icon);
+  g_object_unref(texture);
+
+  GtkWidget *name_label = gtk_label_new(NULL);
+  gtk_label_set_markup(GTK_LABEL(name_label), "<b>MultiClip</b>");
+  gtk_box_append(GTK_BOX(vbox), name_label);
+
+  GtkWidget *version_label = gtk_label_new("Version 0.1.0");
+  gtk_box_append(GTK_BOX(vbox), version_label);
+
+  GtkWidget *link = gtk_link_button_new_with_label(
+      "https://github.com/harsha-deep/multiclip", "GitHub Repository");
+  gtk_box_append(GTK_BOX(vbox), link);
+
+  GtkWidget *update_btn = gtk_button_new_with_label("Check for Updates");
+  // Pass `about` as the parent window for the URI launcher
+  g_signal_connect(update_btn, "clicked", G_CALLBACK(on_check_updates), about);
+  gtk_box_append(GTK_BOX(vbox), update_btn);
+
+  gtk_window_present(GTK_WINDOW(about));
+}
+
+static void
+on_clear_history(GSimpleAction *action G_GNUC_UNUSED,
+                 GVariant *param G_GNUC_UNUSED,
+                 gpointer data)
+{
+  AppData *app = (AppData *)data;
+
+  // Clear the history array (frees strings)
+  g_ptr_array_set_size(app->history, 0);
+
+  // Remove all children from the list box
+  GtkWidget *child;
+  while ((child = gtk_widget_get_first_child(app->list_box)) != NULL)
+    gtk_list_box_remove(GTK_LIST_BOX(app->list_box), child);
+}
 
 static void
 add_to_history(AppData *app, const char *text)
@@ -86,7 +160,40 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
                                   GTK_SELECTION_SINGLE);
 
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), data->list_box);
-  gtk_window_set_child(GTK_WINDOW(window), scroll);
+
+  GMenu *menubar_model = g_menu_new();
+
+  GMenu *file_menu = g_menu_new();
+  g_menu_append(file_menu, "Clear History", "win.clear-history");
+  g_menu_append(file_menu, "Quit", "app.quit");
+  g_menu_append_submenu(menubar_model, "File", G_MENU_MODEL(file_menu));
+  g_object_unref(file_menu);
+
+  GMenu *help_menu = g_menu_new();
+  g_menu_append(help_menu, "About", "win.about");
+  g_menu_append_submenu(menubar_model, "Help", G_MENU_MODEL(help_menu));
+  g_object_unref(help_menu);
+
+  GSimpleAction *clear_action = g_simple_action_new("clear-history", NULL);
+  g_signal_connect(
+      clear_action, "activate", G_CALLBACK(on_clear_history), data);
+  g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(clear_action));
+  g_object_unref(clear_action);
+
+  GSimpleAction *about_action = g_simple_action_new("about", NULL);
+  g_signal_connect(about_action, "activate", G_CALLBACK(on_about), window);
+  g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(about_action));
+  g_object_unref(about_action);
+
+  GtkWidget *menubar_widget
+      = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(menubar_model));
+  g_object_unref(menubar_model);
+
+  GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  gtk_box_append(GTK_BOX(vbox), menubar_widget);
+  gtk_box_append(GTK_BOX(vbox), scroll);
+  gtk_widget_set_vexpand(scroll, TRUE);
+  gtk_window_set_child(GTK_WINDOW(window), vbox);
 
   // Clipboard
   GdkDisplay *display = gdk_display_get_default();
