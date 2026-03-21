@@ -1,0 +1,41 @@
+BasedOnStyle: GNU
+
+# Indentation
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+
+# Line length
+ColumnLimit: 80
+
+# Braces (GNU style)
+BreakBeforeBraces: GNU
+
+# Function formatting
+AllowShortFunctionsOnASingleLine: None
+
+# Pointer style (important for GTK)
+PointerAlignment: Right   # GtkWidget *label
+
+# Spacing
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+
+# Alignments
+AlignOperands: true
+AlignTrailingComments: true
+
+# Wrapping
+AllowAllArgumentsOnNextLine: true
+BinPackArguments: false
+BinPackParameters: false
+
+# Includes
+SortIncludes: true
+
+# Keep things readable
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+
+# GTK macro friendliness
+IndentCaseLabels: true
