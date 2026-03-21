@@ -28,7 +28,6 @@ on_about(GSimpleAction *action G_GNUC_UNUSED,
   gtk_window_set_modal(GTK_WINDOW(about), TRUE);
   gtk_window_set_transient_for(GTK_WINDOW(about), parent);
   gtk_window_set_resizable(GTK_WINDOW(about), FALSE);
-  // gtk_window_set_default_size(GTK_WINDOW(about), 300, 260);
 
   GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
   gtk_widget_set_margin_top(vbox, 24);
@@ -36,10 +35,6 @@ on_about(GSimpleAction *action G_GNUC_UNUSED,
   gtk_widget_set_margin_start(vbox, 24);
   gtk_widget_set_margin_end(vbox, 24);
   gtk_window_set_child(GTK_WINDOW(about), vbox);
-
-  // GtkWidget *icon = gtk_image_new_from_icon_name("edit-paste-symbolic");
-  // gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
-  // gtk_box_append(GTK_BOX(vbox), icon);
 
   GdkTexture *texture = gdk_texture_new_from_file(
       g_file_new_for_path("data/icons/icon.png"), NULL);
@@ -59,7 +54,6 @@ on_about(GSimpleAction *action G_GNUC_UNUSED,
   gtk_box_append(GTK_BOX(vbox), link);
 
   GtkWidget *update_btn = gtk_button_new_with_label("Check for Updates");
-  // Pass `about` as the parent window for the URI launcher
   g_signal_connect(update_btn, "clicked", G_CALLBACK(on_check_updates), about);
   gtk_box_append(GTK_BOX(vbox), update_btn);
 
@@ -73,19 +67,29 @@ on_clear_history(GSimpleAction *action G_GNUC_UNUSED,
 {
   AppData *app = (AppData *)data;
 
-  // Clear the history array (frees strings)
   g_ptr_array_set_size(app->history, 0);
 
-  // Remove all children from the list box
   GtkWidget *child;
   while ((child = gtk_widget_get_first_child(app->list_box)) != NULL)
     gtk_list_box_remove(GTK_LIST_BOX(app->list_box), child);
 }
 
 static void
+on_dark_mode_change_state(GSimpleAction *action,
+                          GVariant *state,
+                          gpointer data G_GNUC_UNUSED)
+{
+  g_simple_action_set_state(action, state);
+  gboolean dark = g_variant_get_boolean(state);
+  g_object_set(gtk_settings_get_default(),
+               "gtk-application-prefer-dark-theme",
+               dark,
+               NULL);
+}
+
+static void
 add_to_history(AppData *app, const char *text)
 {
-  // Dedup: don't add if same as last entry
   if (app->history->len > 0)
     {
       const char *last = g_ptr_array_index(app->history, app->history->len - 1);
@@ -93,16 +97,11 @@ add_to_history(AppData *app, const char *text)
         return;
     }
 
-  // Cap at 50 entries
   if (app->history->len >= 50)
     g_ptr_array_remove_index(app->history, 0);
 
-  // Store a copy of the string
-  g_ptr_array_add(app->history, g_strdup(text));
-
-  // Add a row to the visual list
   GtkWidget *label = gtk_label_new(text);
-  gtk_label_set_xalign(GTK_LABEL(label), 0.0f); // left align
+  gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
   gtk_label_set_max_width_chars(GTK_LABEL(label), 60);
   gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
 
@@ -113,7 +112,7 @@ add_to_history(AppData *app, const char *text)
 static void
 clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data)
 {
-  AppData *app = (AppData *)data; // cast your struct back
+  AppData *app = (AppData *)data;
   GError *error = NULL;
 
   char *text
@@ -134,46 +133,18 @@ clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data)
 static void
 clipboard_changed(GdkClipboard *clipboard, gpointer data)
 {
-  // Pass your AppData through to the callback
   gdk_clipboard_read_text_async(clipboard, NULL, clipboard_text_received, data);
 }
 
 static void
 activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 {
-  // Allocate app state
   AppData *data = g_new0(AppData, 1);
-  data->history = g_ptr_array_new_with_free_func(g_free); // auto-frees strings
+  data->history = g_ptr_array_new_with_free_func(g_free);
 
-  // Window
   GtkWidget *window = gtk_application_window_new(app);
   gtk_window_set_title(GTK_WINDOW(window), "MultiClip");
   gtk_window_set_default_size(GTK_WINDOW(window), 400, 500);
-
-  // Scrollable container
-  GtkWidget *scroll = gtk_scrolled_window_new();
-  gtk_scrolled_window_set_policy(
-      GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-
-  // The list
-  data->list_box = gtk_list_box_new();
-  gtk_list_box_set_selection_mode(GTK_LIST_BOX(data->list_box),
-                                  GTK_SELECTION_SINGLE);
-
-  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), data->list_box);
-
-  GMenu *menubar_model = g_menu_new();
-
-  GMenu *file_menu = g_menu_new();
-  g_menu_append(file_menu, "Clear History", "win.clear-history");
-  g_menu_append(file_menu, "Quit", "app.quit");
-  g_menu_append_submenu(menubar_model, "File", G_MENU_MODEL(file_menu));
-  g_object_unref(file_menu);
-
-  GMenu *help_menu = g_menu_new();
-  g_menu_append(help_menu, "About", "win.about");
-  g_menu_append_submenu(menubar_model, "Help", G_MENU_MODEL(help_menu));
-  g_object_unref(help_menu);
 
   GSimpleAction *clear_action = g_simple_action_new("clear-history", NULL);
   g_signal_connect(
@@ -186,17 +157,61 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(about_action));
   g_object_unref(about_action);
 
-  GtkWidget *menubar_widget
-      = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(menubar_model));
-  g_object_unref(menubar_model);
+  GSimpleAction *dark_action = g_simple_action_new_stateful(
+      "dark-mode", NULL, g_variant_new_boolean(FALSE));
+  g_signal_connect(
+      dark_action, "change-state", G_CALLBACK(on_dark_mode_change_state), NULL);
+  g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(dark_action));
+  g_object_unref(dark_action);
 
-  GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-  gtk_box_append(GTK_BOX(vbox), menubar_widget);
-  gtk_box_append(GTK_BOX(vbox), scroll);
+  GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
+  g_signal_connect_swapped(
+      quit_action, "activate", G_CALLBACK(g_application_quit), app);
+  g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit_action));
+  g_object_unref(quit_action);
+
+  GMenu *menu_model = g_menu_new();
+
+  GMenu *actions_section = g_menu_new();
+  g_menu_append(actions_section, "Clear History", "win.clear-history");
+  g_menu_append_section(menu_model, NULL, G_MENU_MODEL(actions_section));
+  g_object_unref(actions_section);
+
+  GMenu *view_section = g_menu_new();
+  g_menu_append(view_section, "Prefer Dark Theme", "win.dark-mode");
+  g_menu_append_section(menu_model, NULL, G_MENU_MODEL(view_section));
+  g_object_unref(view_section);
+
+  GMenu *app_section = g_menu_new();
+  g_menu_append(app_section, "About", "win.about");
+  g_menu_append(app_section, "Quit", "app.quit");
+  g_menu_append_section(menu_model, NULL, G_MENU_MODEL(app_section));
+  g_object_unref(app_section);
+
+  GtkWidget *header = gtk_header_bar_new();
+
+  GtkWidget *menu_button = gtk_menu_button_new();
+  gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
+                                "open-menu-symbolic");
+  gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
+                                 G_MENU_MODEL(menu_model));
+  g_object_unref(menu_model);
+  gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu_button);
+
+  gtk_window_set_titlebar(GTK_WINDOW(window), header);
+
+  GtkWidget *scroll = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_policy(
+      GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+  data->list_box = gtk_list_box_new();
+  gtk_list_box_set_selection_mode(GTK_LIST_BOX(data->list_box),
+                                  GTK_SELECTION_SINGLE);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), data->list_box);
   gtk_widget_set_vexpand(scroll, TRUE);
-  gtk_window_set_child(GTK_WINDOW(window), vbox);
 
-  // Clipboard
+  gtk_window_set_child(GTK_WINDOW(window), scroll);
+
   GdkDisplay *display = gdk_display_get_default();
   GdkClipboard *clipboard = gdk_display_get_clipboard(display);
   g_signal_connect(clipboard, "changed", G_CALLBACK(clipboard_changed), data);
