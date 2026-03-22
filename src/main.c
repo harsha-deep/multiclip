@@ -1,6 +1,13 @@
 #include "main.h"
 #include "config.h"
 #include "db.h"
+#include "tray.h"
+
+#ifdef GDK_WINDOWING_X11
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <gdk/x11/gdkx.h>
+#endif
 
 static void
 on_check_updates(GtkButton *btn G_GNUC_UNUSED, gpointer data)
@@ -129,6 +136,7 @@ on_row_activated(GtkListBox *box G_GNUC_UNUSED,
     gdk_clipboard_set_texture(cb, texture);
 
   gtk_window_minimize(window);
+  tray_window_hidden = TRUE;
 
   PasteCtx *ctx = g_new0(PasteCtx, 1);
   ctx->window = window;
@@ -351,13 +359,9 @@ clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data)
   if (text)
     {
       if (app->suppress_next)
-        {
-          app->suppress_next = FALSE;
-        }
+        app->suppress_next = FALSE;
       else
-        {
-          add_to_history(app, text, TRUE);
-        }
+        add_to_history(app, text, TRUE);
       g_free(text);
     }
   else if (error)
@@ -372,6 +376,97 @@ clipboard_changed(GdkClipboard *clipboard, gpointer data)
 {
   gdk_clipboard_read_text_async(clipboard, NULL, clipboard_text_received, data);
 }
+
+/* ── Tray / window-close ─────────────────────────────────────────────────── */
+
+static gboolean
+on_window_close_request(GtkWindow *window G_GNUC_UNUSED,
+                        gpointer data G_GNUC_UNUSED)
+{
+  gtk_widget_set_visible(GTK_WIDGET(window), FALSE);
+  tray_window_hidden = TRUE;
+  return TRUE; /* block default destroy */
+}
+
+/* ── X11 global hotkey (pure Xlib, no keybinder, no GTK3) ───────────────── */
+
+#ifdef GDK_WINDOWING_X11
+
+static GtkWindow *s_hotkey_window = NULL;
+
+static gboolean
+hotkey_toggle_idle(gpointer data G_GNUC_UNUSED)
+{
+  if (!s_hotkey_window)
+    return G_SOURCE_REMOVE;
+  if (gtk_widget_get_visible(GTK_WIDGET(s_hotkey_window)))
+    gtk_widget_set_visible(GTK_WIDGET(s_hotkey_window), FALSE);
+  else
+    gtk_window_present(s_hotkey_window);
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer
+hotkey_thread(gpointer data G_GNUC_UNUSED)
+{
+  /* Open a *separate* connection so we never race with GDK's connection. */
+  Display *d = XOpenDisplay(NULL);
+  if (!d)
+    {
+      g_warning("hotkey: XOpenDisplay failed — Super+V disabled");
+      return NULL;
+    }
+
+  Window root = DefaultRootWindow(d);
+  KeyCode kc = XKeysymToKeycode(d, XK_v);
+  int mods = Mod4Mask; /* Super / Win */
+
+  /*
+   * Grab the key four times to cover NumLock (Mod2) and CapsLock (Lock)
+   * being on or off — otherwise the grab silently misses those states.
+   */
+  XGrabKey(d, kc, mods, root, True, GrabModeAsync, GrabModeAsync);
+  XGrabKey(d, kc, mods | Mod2Mask, root, True, GrabModeAsync, GrabModeAsync);
+  XGrabKey(d, kc, mods | LockMask, root, True, GrabModeAsync, GrabModeAsync);
+  XGrabKey(d,
+           kc,
+           mods | Mod2Mask | LockMask,
+           root,
+           True,
+           GrabModeAsync,
+           GrabModeAsync);
+  XSelectInput(d, root, KeyPressMask);
+  XFlush(d);
+
+  for (;;)
+    {
+      XEvent e;
+      XNextEvent(d, &e);
+      if (e.type == KeyPress && e.xkey.keycode == kc)
+        g_idle_add(hotkey_toggle_idle, NULL);
+    }
+
+  /* unreachable */
+  XCloseDisplay(d);
+  return NULL;
+}
+
+static void
+setup_x11_hotkey(GtkWindow *window)
+{
+  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default()))
+    {
+      g_message("hotkey: running under native Wayland — Super+V disabled");
+      return;
+    }
+  s_hotkey_window = window;
+  g_thread_new("multiclip-hotkey", hotkey_thread, NULL);
+}
+
+#endif /* GDK_WINDOWING_X11 */
+
+/* ───────────────────────────────────────────────────────────────────────────
+ */
 
 static void
 activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
@@ -421,6 +516,8 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   g_object_unref(dark_action);
 
   GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
+  g_signal_connect_swapped(
+      quit_action, "activate", G_CALLBACK(tray_cleanup), NULL);
   g_signal_connect_swapped(quit_action, "activate", G_CALLBACK(db_close), NULL);
   g_signal_connect_swapped(
       quit_action, "activate", G_CALLBACK(g_application_quit), app);
@@ -462,7 +559,6 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   data->list_box = gtk_list_box_new();
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(data->list_box),
                                   GTK_SELECTION_SINGLE);
-
   gtk_widget_add_css_class(data->list_box, "background");
 
   g_signal_connect(
@@ -483,6 +579,18 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
                             GTK_EVENT_CONTROLLER(drop_target));
 
   gtk_window_present(GTK_WINDOW(window));
+
+  /* Hide to tray on close instead of quitting */
+  g_signal_connect(
+      window, "close-request", G_CALLBACK(on_window_close_request), NULL);
+
+  /* System tray icon via StatusNotifierItem */
+  tray_init(GTK_WINDOW(window), G_APPLICATION(app));
+
+  /* Global Super+V hotkey — X11 / XWayland only */
+#ifdef GDK_WINDOWING_X11
+  setup_x11_hotkey(GTK_WINDOW(window));
+#endif
 
   GPtrArray *saved = db_load_recent(50);
   for (guint i = 0; i < saved->len; i++)
