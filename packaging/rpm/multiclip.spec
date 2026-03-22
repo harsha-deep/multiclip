@@ -23,5 +23,5 @@ cp -a %{_stagedir}/. %{buildroot}/
 %{_datadir}/metainfo/com.harsha.multiclip.metainfo.xml
 
 %changelog
-* Mon Mar 23 2026 Harsha Deep <harsha@example.com> - 0.1.0-1
+* Mon Mar 23 2026 Harsha Deep <harsha@example.com> - 1.0.0-1
 - Initial release
