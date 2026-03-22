@@ -67,26 +67,28 @@ build_appimage() {
 build_flatpak() {
     echo "==> Building Flatpak..."
     check_tool flatpak-builder
+    check_tool ostree
 
     if ! flatpak info org.gnome.Platform//47 &>/dev/null; then
         echo "  Installing GNOME runtime..."
         flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47
     fi
 
-    local repo="$PROJECT_ROOT/flatpak-repo"
     local bundle="$PROJECT_ROOT/multiclip-$VERSION.flatpak"
 
-    mkdir -p "$repo"
-    ostree init --mode=archive-z2 --repo="$repo" 2>/dev/null || true
+    cd "$PROJECT_ROOT"
 
-    (cd "$PROJECT_ROOT" && flatpak-builder \
+    rm -rf flatpak-repo
+    ostree init --mode=archive-z2 --repo=flatpak-repo
+
+    flatpak-builder \
         --force-clean \
-        --disable-cache \
-        --repo="$repo" \
-        "$PROJECT_ROOT/flatpak-build" \
-        "$SCRIPT_DIR/flatpak/com.harsha.multiclip.yml")
+        --repo=flatpak-repo \
+        flatpak-build \
+        packaging/flatpak/com.harsha.multiclip.yml
 
-    flatpak build-bundle "$repo" "$bundle" com.harsha.multiclip
+    flatpak build-bundle flatpak-repo "$bundle" com.harsha.multiclip
+
     echo "==> Written: $bundle"
 }
 
