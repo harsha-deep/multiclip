@@ -1,5 +1,6 @@
 #include "main.h"
 #include "config.h"
+#include "db.h"
 
 static void
 on_check_updates(GtkButton *btn G_GNUC_UNUSED, gpointer data)
@@ -60,6 +61,8 @@ on_clear_history(GSimpleAction *action G_GNUC_UNUSED,
                  gpointer data)
 {
   AppData *app = (AppData *)data;
+
+  db_clear();
 
   g_ptr_array_set_size(app->history, 0);
 
@@ -164,7 +167,7 @@ make_clip_card(const char *text)
 }
 
 static void
-add_to_history(AppData *app, const char *text)
+add_to_history(AppData *app, const char *text, gboolean persist)
 {
   if (app->history->len > 0)
     {
@@ -177,18 +180,33 @@ add_to_history(AppData *app, const char *text)
     {
       GtkWidget *last_child = gtk_widget_get_last_child(app->list_box);
       if (last_child)
-        gtk_list_box_remove(GTK_LIST_BOX(app->list_box), last_child);
+        {
+          GtkListBoxRow *old_row = GTK_LIST_BOX_ROW(last_child);
+          gint64 *old_id = g_object_get_data(G_OBJECT(old_row), "clip-id");
+          if (old_id)
+            db_delete(*old_id);
+          gtk_list_box_remove(GTK_LIST_BOX(app->list_box), last_child);
+        }
 
       g_ptr_array_remove_index(app->history, 0);
     }
 
   g_ptr_array_add(app->history, g_strdup(text));
 
+  gint64 row_id = persist ? db_insert_text(text) : -1;
+
   GtkWidget *card = make_clip_card(text);
   GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
   gtk_list_box_row_set_child(row, card);
 
   g_object_set_data_full(G_OBJECT(row), "clip-text", g_strdup(text), g_free);
+
+  if (row_id >= 0)
+    {
+      gint64 *idp = g_new(gint64, 1);
+      *idp = row_id;
+      g_object_set_data_full(G_OBJECT(row), "clip-id", idp, g_free);
+    }
 
   gtk_list_box_prepend(GTK_LIST_BOX(app->list_box), GTK_WIDGET(row));
   gtk_widget_set_visible(GTK_WIDGET(row), TRUE);
@@ -211,7 +229,7 @@ clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data)
         }
       else
         {
-          add_to_history(app, text);
+          add_to_history(app, text, TRUE);
         }
       g_free(text);
     }
@@ -231,6 +249,16 @@ clipboard_changed(GdkClipboard *clipboard, gpointer data)
 static void
 activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 {
+  char *data_dir = g_build_filename(g_get_user_data_dir(), "multiclip", NULL);
+  g_mkdir_with_parents(data_dir, 0700);
+  char *db_path = g_build_filename(data_dir, "history.db", NULL);
+  g_free(data_dir);
+
+  if (!db_open(db_path))
+    g_warning("Could not open database at %s — history will not be saved",
+              db_path);
+  g_free(db_path);
+
   AppData *data = g_new0(AppData, 1);
   data->history = g_ptr_array_new_with_free_func(g_free);
   data->suppress_next = FALSE;
@@ -266,6 +294,7 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   g_object_unref(dark_action);
 
   GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
+  g_signal_connect_swapped(quit_action, "activate", G_CALLBACK(db_close), NULL);
   g_signal_connect_swapped(
       quit_action, "activate", G_CALLBACK(g_application_quit), app);
   g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit_action));
@@ -321,6 +350,15 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   g_signal_connect(clipboard, "changed", G_CALLBACK(clipboard_changed), data);
 
   gtk_window_present(GTK_WINDOW(window));
+
+  GPtrArray *saved = db_load_recent(50);
+  for (guint i = 0; i < saved->len; i++)
+    {
+      ClipEntry *e = g_ptr_array_index(saved, i);
+      if (e->type == CLIP_TYPE_TEXT && e->text)
+        add_to_history(data, e->text, FALSE);
+    }
+  db_entries_free(saved);
 }
 
 int

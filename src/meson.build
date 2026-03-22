@@ -1,5 +1,6 @@
 sources = [
-  'main.c'
+  'main.c',
+  'db.c'
 ]
 
 config_h = configure_file(
@@ -8,10 +9,12 @@ config_h = configure_file(
   configuration: {'version': meson.project_version()}
 )
 
+sqlite3 = dependency('sqlite3')
+
 executable(
   'multiclip',
   sources,
-  dependencies: [gtk],
+  dependencies: [gtk, sqlite3],
   include_directories: include_directories('.'),
   install: true
 )
