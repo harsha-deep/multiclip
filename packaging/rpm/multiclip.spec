@@ -1,39 +1,27 @@
-Name:           multiclip
-Version:        0.1.0
-Release:        1%{?dist}
-Summary:        MultiClip clipboard manager
+Name:    multiclip
+Version: %{_version}
+Release: 1%{?dist}
+Summary: Multi-entry clipboard manager
+License: MIT
+URL:     https://github.com/harsha-deep/multiclip
 
-License:        MIT
-URL:            https://github.com/harsha/multiclip
-Source0:        %{name}-%{version}.tar.gz
+# No Source, no BuildRequires — binary is pre-built outside rpmbuild
 
-BuildRequires:  meson >= 0.61
-BuildRequires:  ninja-build
-BuildRequires:  gcc
-BuildRequires:  gtk4-devel
-
-Requires:       gtk4
+Requires: gtk4, sqlite-libs, xdotool
 
 %description
-MultiClip is a clipboard manager application built with GTK4.
-
-%prep
-%autosetup
-
-%build
-%meson
-%meson_build
+MultiClip stores your clipboard history and lets you paste
+any previous entry with a single click or global hotkey (Super+V).
 
 %install
-%meson_install
+cp -a %{_stagedir}/. %{buildroot}/
 
 %files
-%license LICENSE
 %{_bindir}/multiclip
 %{_datadir}/applications/com.harsha.multiclip.desktop
 %{_datadir}/icons/hicolor/256x256/apps/com.harsha.multiclip.png
 %{_datadir}/metainfo/com.harsha.multiclip.metainfo.xml
 
 %changelog
-* Sat Mar 14 2026 Harshadeep Donapati <harsha@example.com> - 0.1.0-1
+* Mon Mar 23 2026 Harsha Deep <harsha@example.com> - 0.1.0-1
 - Initial release

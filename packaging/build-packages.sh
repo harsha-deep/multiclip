@@ -76,14 +76,18 @@ build_flatpak() {
     local repo="$PROJECT_ROOT/flatpak-repo"
     local bundle="$PROJECT_ROOT/multiclip-$VERSION.flatpak"
 
-    flatpak-builder \
+    mkdir -p "$repo"
+    ostree init --mode=archive-z2 --repo="$repo" 2>/dev/null || true
+
+    (cd "$PROJECT_ROOT" && flatpak-builder \
         --force-clean \
+        --disable-cache \
         --repo="$repo" \
         "$PROJECT_ROOT/flatpak-build" \
-        "$SCRIPT_DIR/flatpak/com.harsha.multiclip.yml"
+        "$SCRIPT_DIR/flatpak/com.harsha.multiclip.yml")
 
     flatpak build-bundle "$repo" "$bundle" com.harsha.multiclip
-    echo "==> Written: multiclip-$VERSION.flatpak"
+    echo "==> Written: $bundle"
 }
 
 FORMATS=("$@")
