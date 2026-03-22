@@ -1,11 +1,5 @@
+#include "main.h"
 #include "config.h"
-#include <gtk/gtk.h>
-
-typedef struct
-{
-  GtkWidget *list_box;
-  GPtrArray *history;
-} AppData;
 
 static void
 on_check_updates(GtkButton *btn G_GNUC_UNUSED, gpointer data)
@@ -88,6 +82,88 @@ on_dark_mode_change_state(GSimpleAction *action,
 }
 
 static void
+on_copy_btn_clicked(GtkButton *btn, gpointer data G_GNUC_UNUSED)
+{
+  const char *text = g_object_get_data(G_OBJECT(btn), "clip-text");
+  GdkClipboard *cb = gdk_display_get_clipboard(gdk_display_get_default());
+  gdk_clipboard_set_text(cb, text);
+}
+
+static gboolean
+do_paste(gpointer data)
+{
+  PasteCtx *ctx = data;
+
+  ctx->app->suppress_next = TRUE;
+
+  if (!g_spawn_command_line_async("xdotool key --clearmodifiers ctrl+v", NULL))
+    g_spawn_command_line_async("wtype -M ctrl v -m ctrl", NULL);
+
+  g_free(ctx);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+on_row_activated(GtkListBox *box G_GNUC_UNUSED,
+                 GtkListBoxRow *row,
+                 gpointer data)
+{
+  AppData *app = (AppData *)data;
+  GtkWindow *window
+      = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(app->list_box)));
+  const char *text = g_object_get_data(G_OBJECT(row), "clip-text");
+  if (!text)
+    return;
+
+  GdkClipboard *cb = gdk_display_get_clipboard(gdk_display_get_default());
+  gdk_clipboard_set_text(cb, text);
+
+  gtk_window_minimize(window);
+
+  PasteCtx *ctx = g_new0(PasteCtx, 1);
+  ctx->window = window;
+  ctx->app = app;
+  g_timeout_add(200, do_paste, ctx);
+}
+
+static GtkWidget *
+make_clip_card(const char *text)
+{
+  GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+  gtk_widget_add_css_class(card, "clip-card");
+
+  GtkWidget *label = gtk_label_new(text);
+  gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+  gtk_label_set_max_width_chars(GTK_LABEL(label), 55);
+  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+  gtk_label_set_lines(GTK_LABEL(label), 3);
+  gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+  gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+  gtk_widget_set_hexpand(label, TRUE);
+  gtk_box_append(GTK_BOX(card), label);
+
+  GtkWidget *bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_box_append(GTK_BOX(card), bottom);
+
+  GtkWidget *meta = gtk_label_new(g_strdup_printf("%zu chars", strlen(text)));
+  gtk_widget_add_css_class(meta, "clip-meta");
+  gtk_label_set_xalign(GTK_LABEL(meta), 0.0f);
+  gtk_widget_set_hexpand(meta, TRUE);
+  gtk_box_append(GTK_BOX(bottom), meta);
+
+  GtkWidget *copy_btn = gtk_button_new_from_icon_name("edit-copy-symbolic");
+  gtk_widget_add_css_class(copy_btn, "flat");
+  gtk_widget_add_css_class(copy_btn, "copy-btn");
+  gtk_widget_set_tooltip_text(copy_btn, "Copy to clipboard");
+  g_object_set_data_full(
+      G_OBJECT(copy_btn), "clip-text", g_strdup(text), g_free);
+  g_signal_connect(copy_btn, "clicked", G_CALLBACK(on_copy_btn_clicked), NULL);
+  gtk_box_append(GTK_BOX(bottom), copy_btn);
+
+  return card;
+}
+
+static void
 add_to_history(AppData *app, const char *text)
 {
   if (app->history->len > 0)
@@ -98,17 +174,24 @@ add_to_history(AppData *app, const char *text)
     }
 
   if (app->history->len >= 50)
-    g_ptr_array_remove_index(app->history, 0);
+    {
+      GtkWidget *last_child = gtk_widget_get_last_child(app->list_box);
+      if (last_child)
+        gtk_list_box_remove(GTK_LIST_BOX(app->list_box), last_child);
+
+      g_ptr_array_remove_index(app->history, 0);
+    }
 
   g_ptr_array_add(app->history, g_strdup(text));
 
-  GtkWidget *label = gtk_label_new(text);
-  gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-  gtk_label_set_max_width_chars(GTK_LABEL(label), 60);
-  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+  GtkWidget *card = make_clip_card(text);
+  GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
+  gtk_list_box_row_set_child(row, card);
 
-  gtk_list_box_prepend(GTK_LIST_BOX(app->list_box), label);
-  gtk_widget_set_visible(label, TRUE);
+  g_object_set_data_full(G_OBJECT(row), "clip-text", g_strdup(text), g_free);
+
+  gtk_list_box_prepend(GTK_LIST_BOX(app->list_box), GTK_WIDGET(row));
+  gtk_widget_set_visible(GTK_WIDGET(row), TRUE);
 }
 
 static void
@@ -122,7 +205,14 @@ clipboard_text_received(GObject *source, GAsyncResult *res, gpointer data)
 
   if (text)
     {
-      add_to_history(app, text);
+      if (app->suppress_next)
+        {
+          app->suppress_next = FALSE;
+        }
+      else
+        {
+          add_to_history(app, text);
+        }
       g_free(text);
     }
   else if (error)
@@ -143,10 +233,19 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 {
   AppData *data = g_new0(AppData, 1);
   data->history = g_ptr_array_new_with_free_func(g_free);
+  data->suppress_next = FALSE;
 
   GtkWidget *window = gtk_application_window_new(app);
   gtk_window_set_title(GTK_WINDOW(window), "MultiClip");
-  gtk_window_set_default_size(GTK_WINDOW(window), 400, 500);
+  gtk_window_set_default_size(GTK_WINDOW(window), 420, 540);
+
+  GtkCssProvider *css = gtk_css_provider_new();
+  gtk_css_provider_load_from_string(css, CARD_CSS);
+  gtk_style_context_add_provider_for_display(
+      gdk_display_get_default(),
+      GTK_STYLE_PROVIDER(css),
+      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref(css);
 
   GSimpleAction *clear_action = g_simple_action_new("clear-history", NULL);
   g_signal_connect(
@@ -191,7 +290,6 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   g_object_unref(app_section);
 
   GtkWidget *header = gtk_header_bar_new();
-
   GtkWidget *menu_button = gtk_menu_button_new();
   gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
                                 "open-menu-symbolic");
@@ -199,7 +297,6 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
                                  G_MENU_MODEL(menu_model));
   g_object_unref(menu_model);
   gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu_button);
-
   gtk_window_set_titlebar(GTK_WINDOW(window), header);
 
   GtkWidget *scroll = gtk_scrolled_window_new();
@@ -209,9 +306,14 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   data->list_box = gtk_list_box_new();
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(data->list_box),
                                   GTK_SELECTION_SINGLE);
+
+  gtk_widget_add_css_class(data->list_box, "background");
+
+  g_signal_connect(
+      data->list_box, "row-activated", G_CALLBACK(on_row_activated), data);
+
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), data->list_box);
   gtk_widget_set_vexpand(scroll, TRUE);
-
   gtk_window_set_child(GTK_WINDOW(window), scroll);
 
   GdkDisplay *display = gdk_display_get_default();
