@@ -1,21 +1,17 @@
 #!/bin/bash
-# Build all package formats for multiclip.
-#
-# Usage:
-#   ./packaging/build-packages.sh [deb] [rpm] [appimage] [flatpak]
-#
-# With no arguments, all formats are built.
-# Tools required per format:
-#   deb      — dpkg-buildpackage, debhelper, libgtk-4-dev
-#   rpm      — rpmbuild, gtk4-devel
-#   appimage — linuxdeploy, appimagetool (see packaging/appimage/build-appimage.sh)
-#   flatpak  — flatpak-builder, org.gnome.Platform//47, org.gnome.Sdk//47
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="$PROJECT_ROOT/build"
 VERSION="0.1.0"
+
+check_tool() {
+    if ! command -v "$1" &>/dev/null; then
+        echo "ERROR: '$1' is required but not installed." >&2
+        exit 1
+    fi
+}
 
 build_deb() {
     echo "==> Building .deb..."
@@ -23,13 +19,11 @@ build_deb() {
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' RETURN
 
-    # Copy source tree into a versioned directory (required by dpkg-buildpackage)
     local srcdir="$tmpdir/multiclip-$VERSION"
-    rsync -a --exclude='.git' --exclude='packaging/build' \
-        --exclude='packaging/appimage/AppDir' --exclude='packaging/appimage/build-appimage' \
+    rsync -a --exclude='.git' --exclude='build' \
+        --exclude='packaging/appimage/AppDir' \
         "$PROJECT_ROOT/" "$srcdir/"
 
-    # Symlink the debian dir into the expected location
     ln -sf "$SCRIPT_DIR/debian" "$srcdir/debian"
 
     (cd "$srcdir" && dpkg-buildpackage -us -uc -b)
@@ -40,20 +34,28 @@ build_deb() {
 
 build_rpm() {
     echo "==> Building .rpm..."
-    local tarball="$PROJECT_ROOT/multiclip-$VERSION.tar.gz"
+    check_tool rpmbuild
 
-    # Create source tarball from git (excludes untracked/build files)
-    (cd "$PROJECT_ROOT" && git archive --format=tar.gz --prefix="multiclip-$VERSION/" \
-        -o "$tarball" HEAD)
+    meson setup --reconfigure "$BUILD_DIR" "$PROJECT_ROOT" \
+        --prefix=/usr --buildtype=release
+    ninja -C "$BUILD_DIR"
+
+    local stagedir
+    stagedir="$(mktemp -d)"
+    trap 'rm -rf "$stagedir"' RETURN
+
+    DESTDIR="$stagedir" ninja -C "$BUILD_DIR" install
 
     mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-    cp "$tarball" ~/rpmbuild/SOURCES/
     cp "$SCRIPT_DIR/rpm/multiclip.spec" ~/rpmbuild/SPECS/
 
-    rpmbuild -bb ~/rpmbuild/SPECS/multiclip.spec
+    rpmbuild -bb ~/rpmbuild/SPECS/multiclip.spec \
+        --define "_version $VERSION" \
+        --define "_stagedir $stagedir" \
+        --nodeps
 
-    find ~/rpmbuild/RPMS -name 'multiclip-*.rpm' -exec cp {} "$PROJECT_ROOT/" \;
-    rm -f "$tarball"
+    find ~/rpmbuild/RPMS -name 'multiclip-*.rpm' \
+        -exec cp {} "$PROJECT_ROOT/" \;
     echo "==> .rpm written to $PROJECT_ROOT"
 }
 
@@ -64,18 +66,26 @@ build_appimage() {
 
 build_flatpak() {
     echo "==> Building Flatpak..."
+    check_tool flatpak-builder
+
+    if ! flatpak info org.gnome.Platform//47 &>/dev/null; then
+        echo "  Installing GNOME runtime..."
+        flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47
+    fi
+
     local repo="$PROJECT_ROOT/flatpak-repo"
     local bundle="$PROJECT_ROOT/multiclip-$VERSION.flatpak"
 
-    flatpak-builder --force-clean --repo="$repo" \
+    flatpak-builder \
+        --force-clean \
+        --repo="$repo" \
         "$PROJECT_ROOT/flatpak-build" \
         "$SCRIPT_DIR/flatpak/com.harsha.multiclip.yml"
 
     flatpak build-bundle "$repo" "$bundle" com.harsha.multiclip
-    echo "==> Flatpak bundle written to $bundle"
+    echo "==> Written: multiclip-$VERSION.flatpak"
 }
 
-# Parse arguments — default to all formats
 FORMATS=("$@")
 if [ ${#FORMATS[@]} -eq 0 ]; then
     FORMATS=(deb rpm appimage flatpak)
@@ -87,7 +97,10 @@ for fmt in "${FORMATS[@]}"; do
         rpm)      build_rpm ;;
         appimage) build_appimage ;;
         flatpak)  build_flatpak ;;
-        *)        echo "Unknown format: $fmt (valid: deb rpm appimage flatpak)" >&2; exit 1 ;;
+        *)
+            echo "Unknown format: $fmt (valid: deb rpm appimage flatpak)" >&2
+            exit 1
+            ;;
     esac
 done
 

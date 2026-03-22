@@ -377,18 +377,14 @@ clipboard_changed(GdkClipboard *clipboard, gpointer data)
   gdk_clipboard_read_text_async(clipboard, NULL, clipboard_text_received, data);
 }
 
-/* ── Tray / window-close ─────────────────────────────────────────────────── */
-
 static gboolean
 on_window_close_request(GtkWindow *window G_GNUC_UNUSED,
                         gpointer data G_GNUC_UNUSED)
 {
   gtk_widget_set_visible(GTK_WIDGET(window), FALSE);
   tray_window_hidden = TRUE;
-  return TRUE; /* block default destroy */
+  return TRUE;
 }
-
-/* ── X11 global hotkey (pure Xlib, no keybinder, no GTK3) ───────────────── */
 
 #ifdef GDK_WINDOWING_X11
 
@@ -409,7 +405,6 @@ hotkey_toggle_idle(gpointer data G_GNUC_UNUSED)
 static gpointer
 hotkey_thread(gpointer data G_GNUC_UNUSED)
 {
-  /* Open a *separate* connection so we never race with GDK's connection. */
   Display *d = XOpenDisplay(NULL);
   if (!d)
     {
@@ -419,12 +414,8 @@ hotkey_thread(gpointer data G_GNUC_UNUSED)
 
   Window root = DefaultRootWindow(d);
   KeyCode kc = XKeysymToKeycode(d, XK_v);
-  int mods = Mod4Mask; /* Super / Win */
+  int mods = Mod4Mask;
 
-  /*
-   * Grab the key four times to cover NumLock (Mod2) and CapsLock (Lock)
-   * being on or off — otherwise the grab silently misses those states.
-   */
   XGrabKey(d, kc, mods, root, True, GrabModeAsync, GrabModeAsync);
   XGrabKey(d, kc, mods | Mod2Mask, root, True, GrabModeAsync, GrabModeAsync);
   XGrabKey(d, kc, mods | LockMask, root, True, GrabModeAsync, GrabModeAsync);
@@ -446,7 +437,6 @@ hotkey_thread(gpointer data G_GNUC_UNUSED)
         g_idle_add(hotkey_toggle_idle, NULL);
     }
 
-  /* unreachable */
   XCloseDisplay(d);
   return NULL;
 }
@@ -463,10 +453,7 @@ setup_x11_hotkey(GtkWindow *window)
   g_thread_new("multiclip-hotkey", hotkey_thread, NULL);
 }
 
-#endif /* GDK_WINDOWING_X11 */
-
-/* ───────────────────────────────────────────────────────────────────────────
- */
+#endif
 
 static void
 activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
@@ -580,14 +567,11 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 
   gtk_window_present(GTK_WINDOW(window));
 
-  /* Hide to tray on close instead of quitting */
   g_signal_connect(
       window, "close-request", G_CALLBACK(on_window_close_request), NULL);
 
-  /* System tray icon via StatusNotifierItem */
   tray_init(GTK_WINDOW(window), G_APPLICATION(app));
 
-  /* Global Super+V hotkey — X11 / XWayland only */
 #ifdef GDK_WINDOWING_X11
   setup_x11_hotkey(GTK_WINDOW(window));
 #endif
