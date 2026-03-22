@@ -114,12 +114,19 @@ on_row_activated(GtkListBox *box G_GNUC_UNUSED,
   AppData *app = (AppData *)data;
   GtkWindow *window
       = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(app->list_box)));
+
   const char *text = g_object_get_data(G_OBJECT(row), "clip-text");
-  if (!text)
+  GdkTexture *texture = g_object_get_data(G_OBJECT(row), "clip-texture");
+
+  if (!text && !texture)
     return;
 
   GdkClipboard *cb = gdk_display_get_clipboard(gdk_display_get_default());
-  gdk_clipboard_set_text(cb, text);
+
+  if (text)
+    gdk_clipboard_set_text(cb, text);
+  else
+    gdk_clipboard_set_texture(cb, texture);
 
   gtk_window_minimize(window);
 
@@ -166,6 +173,52 @@ make_clip_card(const char *text)
   return card;
 }
 
+static GtkWidget *
+make_image_card(GdkTexture *texture, const char *name)
+{
+  GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+  gtk_widget_add_css_class(card, "clip-card");
+
+  GtkWidget *picture = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
+  gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_CONTAIN);
+  gtk_picture_set_can_shrink(GTK_PICTURE(picture), TRUE);
+  gtk_widget_set_size_request(picture, -1, 200);
+  gtk_box_append(GTK_BOX(card), picture);
+
+  GtkWidget *label = gtk_label_new(name);
+  gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+  gtk_label_set_max_width_chars(GTK_LABEL(label), 55);
+  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_widget_add_css_class(label, "clip-meta");
+  gtk_box_append(GTK_BOX(card), label);
+
+  return card;
+}
+
+static void
+add_image_to_history(AppData *app,
+                     GdkTexture *texture,
+                     const char *name,
+                     gint64 row_id)
+{
+  GtkWidget *card = make_image_card(texture, name);
+  GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
+  gtk_list_box_row_set_child(row, card);
+
+  g_object_set_data_full(
+      G_OBJECT(row), "clip-texture", g_object_ref(texture), g_object_unref);
+
+  if (row_id >= 0)
+    {
+      gint64 *idp = g_new(gint64, 1);
+      *idp = row_id;
+      g_object_set_data_full(G_OBJECT(row), "clip-id", idp, g_free);
+    }
+
+  gtk_list_box_prepend(GTK_LIST_BOX(app->list_box), GTK_WIDGET(row));
+  gtk_widget_set_visible(GTK_WIDGET(row), TRUE);
+}
+
 static void
 add_to_history(AppData *app, const char *text, gboolean persist)
 {
@@ -210,6 +263,80 @@ add_to_history(AppData *app, const char *text, gboolean persist)
 
   gtk_list_box_prepend(GTK_LIST_BOX(app->list_box), GTK_WIDGET(row));
   gtk_widget_set_visible(GTK_WIDGET(row), TRUE);
+}
+
+static gboolean
+on_drop(GtkDropTarget *target G_GNUC_UNUSED,
+        const GValue *value,
+        double x G_GNUC_UNUSED,
+        double y G_GNUC_UNUSED,
+        gpointer data)
+{
+  if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
+    return FALSE;
+
+  AppData *app = (AppData *)data;
+  GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
+  gboolean handled = FALSE;
+
+  for (GSList *l = files; l != NULL; l = l->next)
+    {
+      GFile *file = G_FILE(l->data);
+      char *path = g_file_get_path(file);
+      if (!path)
+        continue;
+
+      gchar *lower = g_ascii_strdown(path, -1);
+      gboolean is_image = g_str_has_suffix(lower, ".jpg")
+                          || g_str_has_suffix(lower, ".jpeg")
+                          || g_str_has_suffix(lower, ".png")
+                          || g_str_has_suffix(lower, ".gif");
+      g_free(lower);
+
+      if (is_image)
+        {
+          GError *error = NULL;
+          GBytes *bytes = g_file_load_bytes(file, NULL, NULL, &error);
+          if (!bytes)
+            {
+              g_warning("on_drop: cannot read '%s': %s",
+                        path,
+                        error ? error->message : "unknown");
+              g_clear_error(&error);
+              g_free(path);
+              continue;
+            }
+
+          GdkTexture *texture = gdk_texture_new_from_bytes(bytes, &error);
+          if (!texture)
+            {
+              g_warning("on_drop: cannot decode '%s': %s",
+                        path,
+                        error ? error->message : "unknown");
+              g_clear_error(&error);
+              g_bytes_unref(bytes);
+              g_free(path);
+              continue;
+            }
+
+          char *name = g_path_get_basename(path);
+          gsize data_size;
+          gconstpointer raw = g_bytes_get_data(bytes, &data_size);
+          gint64 row_id
+              = db_insert_image((const unsigned char *)raw, data_size);
+
+          add_image_to_history(app, texture, name, row_id);
+
+          g_free(name);
+          g_bytes_unref(bytes);
+          g_object_unref(texture);
+          handled = TRUE;
+        }
+
+      g_free(path);
+    }
+
+  return handled;
 }
 
 static void
@@ -349,6 +476,12 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
   GdkClipboard *clipboard = gdk_display_get_clipboard(display);
   g_signal_connect(clipboard, "changed", G_CALLBACK(clipboard_changed), data);
 
+  GtkDropTarget *drop_target
+      = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+  g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop), data);
+  gtk_widget_add_controller(GTK_WIDGET(window),
+                            GTK_EVENT_CONTROLLER(drop_target));
+
   gtk_window_present(GTK_WINDOW(window));
 
   GPtrArray *saved = db_load_recent(50);
@@ -357,6 +490,17 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
       ClipEntry *e = g_ptr_array_index(saved, i);
       if (e->type == CLIP_TYPE_TEXT && e->text)
         add_to_history(data, e->text, FALSE);
+      else if (e->type == CLIP_TYPE_IMAGE && e->blob && e->blob_size > 0)
+        {
+          GBytes *bytes = g_bytes_new(e->blob, e->blob_size);
+          GdkTexture *texture = gdk_texture_new_from_bytes(bytes, NULL);
+          g_bytes_unref(bytes);
+          if (texture)
+            {
+              add_image_to_history(data, texture, "Saved image", e->id);
+              g_object_unref(texture);
+            }
+        }
     }
   db_entries_free(saved);
 }
